@@ -40,8 +40,8 @@ func NewWriteThroughCache[K comparable, V comparable](storage WriteThroughCacheS
 func (c *WriteThroughCache[K, V]) Update(ctx context.Context, key K, value V) error {
 	ctx, cancel := c.mu.Lock(ctx)
 	defer cancel()
-	if ctx.Err() != nil {
-		return ctx.Err()
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 
 	if err := c.storage.Update(ctx, key, value); err != nil {
@@ -60,8 +60,8 @@ func (c *WriteThroughCache[K, V]) Get(ctx context.Context, key K) (V, error) {
 
 	ctx, cancel := c.mu.Lock(ctx)
 	defer cancel()
-	if ctx.Err() != nil {
-		return zero, ctx.Err()
+	if err := ctx.Err(); err != nil {
+		return zero, err
 	}
 
 	if value, ok := c.values[key]; ok {
@@ -80,8 +80,8 @@ func (c *WriteThroughCache[K, V]) getFromCache(ctx context.Context, key K) (V, e
 	var zero V
 	ctx, cancel := c.mu.RLock(ctx)
 	defer cancel()
-	if ctx.Err() != nil {
-		return zero, ctx.Err()
+	if err := ctx.Err(); err != nil {
+		return zero, err
 	}
 
 	if value, ok := c.values[key]; ok {
@@ -89,4 +89,25 @@ func (c *WriteThroughCache[K, V]) getFromCache(ctx context.Context, key K) (V, e
 	}
 
 	return zero, nil
+}
+
+type WriteThroughCached[V comparable] struct {
+	getFn    func(ctx context.Context) (V, error)
+	updateFn func(ctx context.Context, value V) error
+}
+
+func NewWriteThroughCached[K comparable, V comparable](storage WriteThroughCacheStorage[K, V], key K) *WriteThroughCached[V] {
+	cache := NewWriteThroughCache[K, V](storage)
+	return &WriteThroughCached[V]{
+		getFn:    func(ctx context.Context) (V, error) { return cache.Get(ctx, key) },
+		updateFn: func(ctx context.Context, value V) error { return cache.Update(ctx, key, value) },
+	}
+}
+
+func (c *WriteThroughCached[V]) Get(ctx context.Context) (V, error) {
+	return c.getFn(ctx)
+}
+
+func (c *WriteThroughCached[V]) Update(ctx context.Context, value V) error {
+	return c.updateFn(ctx, value)
 }

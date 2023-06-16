@@ -15,6 +15,29 @@ type Locker interface {
 	Lock(ctx context.Context) (context.Context, context.CancelFunc)
 }
 
+type Lockers []Locker
+
+func (ls Lockers) Lock(ctx context.Context) (context.Context, context.CancelFunc) {
+	var (
+		cancels []context.CancelFunc
+		cancel  context.CancelFunc
+	)
+
+	for _, l := range ls {
+		ctx, cancel = l.Lock(ctx)
+		cancels = append(cancels, cancel)
+		if ctx.Err() != nil {
+			break
+		}
+	}
+
+	return ctx, func() {
+		for i := len(cancels) - 1; i >= 0; i-- {
+			cancels[i]()
+		}
+	}
+}
+
 // RWLocker supports read-write locks.
 type RWLocker interface {
 	Locker
@@ -67,7 +90,7 @@ func (s *semaphore) doLock(ctx context.Context) (context.Context, context.Cancel
 			}
 		}
 
-		once := new(sync.Once)
+		var once sync.Once
 		return ctx, func() { once.Do(func() { s.c <- s.clock.Now() }) }
 	case <-ctx.Done():
 		return ctx, noop
@@ -98,7 +121,7 @@ func (m *RWMutex) doLock(ctx context.Context) (context.Context, context.CancelFu
 	m.once.Do(m.init)
 	select {
 	case m.w <- true:
-		once := new(sync.Once)
+		var once sync.Once
 		return ctx, func() { once.Do(func() { <-m.w }) }
 	case <-ctx.Done():
 		return ctx, noop
@@ -117,7 +140,7 @@ func (m *RWMutex) doRLock(ctx context.Context) (context.Context, context.CancelF
 
 	rs++
 	m.r <- rs
-	once := new(sync.Once)
+	var once sync.Once
 	return ctx, func() {
 		once.Do(func() {
 			rs := <-m.r
@@ -159,3 +182,47 @@ func reentrantLock(ctx context.Context, key any, level int, lock ContextFunc) (c
 }
 
 func noop() {}
+
+type WaitGroup struct {
+	sync.WaitGroup
+}
+
+func (wg *WaitGroup) Spawn(ctx context.Context) (context.Context, context.CancelFunc) {
+	wg.Add(1)
+	var once sync.Once
+	return ctx, func() {
+		once.Do(func() {
+			wg.Done()
+		})
+	}
+}
+
+func Go(ctx context.Context, contextFn ContextFunc, fn func(ctx context.Context)) context.CancelFunc {
+	ctx, cancel := contextFn(ctx)
+	go func(ctx context.Context, cancel context.CancelFunc) {
+		defer cancel()
+		fn(ctx)
+	}(ctx, cancel)
+
+	return cancel
+}
+
+func GoWithFeedback(ctx context.Context, contextFn ContextFunc, fn func(ctx context.Context)) context.CancelFunc {
+	ctx, cancel := contextFn(ctx)
+	var wg WaitGroup
+	_ = Go(ctx, func(ctx context.Context) (context.Context, context.CancelFunc) {
+		ctx, done := wg.Spawn(ctx)
+		return ctx, func() {
+			done()
+			cancel()
+		}
+	}, fn)
+
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			cancel()
+			wg.Wait()
+		})
+	}
+}
