@@ -1,0 +1,24 @@
+name: Go
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: set up go
+        uses: actions/setup-go@v3
+        with:
+          go-version: stable
+      - name: build
+        run: go build -v ./...
+      - name: test
+        run: go test -v ./...
+      - name: update coverage
+        uses: ncruces/go-coverage-report@main
