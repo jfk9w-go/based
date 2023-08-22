@@ -3,10 +3,6 @@ updates:
   - package-ecosystem: gomod
     directory: /
     schedule:
-      interval: weekly
+      interval: daily
     labels:
-      - deps
-    assignees:
-      - jfk9w
-    reviewers:
-      - jfk9w
+      - dependabot
