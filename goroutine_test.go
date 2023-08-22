@@ -37,9 +37,7 @@ func TestGoroutine(t *testing.T) {
 
 		handle := based.Go(ctx, func(ctx context.Context) {
 			wg.Done()
-			select {
-			case <-ctx.Done():
-			}
+			<-ctx.Done()
 		})
 
 		wg.Wait()
